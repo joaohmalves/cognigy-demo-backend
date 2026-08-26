@@ -2,6 +2,8 @@ import cors from 'cors';
 import express from 'express';
 import dotenv from 'dotenv';
 import onebankRoutes from './routes/onebank.routes.js';
+import cognigyRoutes from './routes/cognigy.routes.js';
+
 
 dotenv.config();
 
@@ -9,6 +11,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use('/api/cognigy', cognigyRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({

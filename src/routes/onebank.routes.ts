@@ -6,9 +6,34 @@ import {
   mapInboundEventToFrontend,
   removeSseClient
 } from '../onebank/cognigyEvents.js';
+import { registerSession } from '../onebank/cognigySession.js';
+import { injectPageContext } from '../onebank/cognigyInject.js';
 
 const router = Router();
 const repo = new InMemoryBankingRepository();
+
+router.post('/cognigy/session', (req, res) => {
+  const { userId, sessionId } = req.body ?? {};
+ 
+  if (!userId || !sessionId) {
+    return res.status(400).json({ error: 'userId e sessionId são obrigatórios' });
+  }
+ 
+  registerSession(userId, sessionId);
+  console.info('[Cognigy session] registrada', { userId, sessionId });
+  res.status(200).json({ registered: true });
+});
+
+router.post('/page-context', async (req, res) => {
+  const { userId, pageContext } = req.body ?? {};
+ 
+  if (!userId || !pageContext) {
+    return res.status(400).json({ error: 'userId e pageContext são obrigatórios' });
+  }
+ 
+  const result = await injectPageContext(userId, pageContext);
+  res.status(202).json(result);
+});
 
 router.get('/customer', (_req, res) => {
   res.json(repo.getCustomer());
