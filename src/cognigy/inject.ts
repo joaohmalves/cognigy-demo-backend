@@ -1,7 +1,7 @@
 import { getAgentConfig } from '../config/cognigyAgents.js';
 import { getActiveSessionId } from './session.js';
 
-export async function injectPageContext(vertical: string, userId: string, pageContext: unknown) {
+export async function injectPageContext(vertical: string, userId: string, payload: unknown) {
   const config = getAgentConfig(vertical);
   if (!config) {
     console.warn(`[Cognigy inject] vertical "${vertical}" não configurada no .env (veja src/config/cognigyAgents.ts)`);
@@ -18,7 +18,7 @@ export async function injectPageContext(vertical: string, userId: string, pageCo
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, sessionId, text: '', data: { pageContext } }),
+    body: JSON.stringify({ userId, sessionId, text: '', data: payload }),
   });
 
   if (!response.ok) {

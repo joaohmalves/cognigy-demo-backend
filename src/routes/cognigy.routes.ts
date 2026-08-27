@@ -24,13 +24,13 @@ router.post('/:vertical/session', (req, res) => {
 // POST /api/cognigy/:vertical/page-context   body: { userId, pageContext }
 router.post('/:vertical/page-context', async (req, res) => {
   const { vertical } = req.params;
-  const { userId, pageContext } = req.body ?? {};
+  const { userId, pageContext, pageDescription } = req.body ?? {};
 
   if (!userId || !pageContext) {
     return res.status(400).json({ error: 'userId e pageContext são obrigatórios' });
   }
 
-  const result = await injectPageContext(vertical, userId, pageContext);
+  const result = await injectPageContext(vertical, userId, { pageContext, pageDescription });
   res.status(202).json(result);
 });
 
