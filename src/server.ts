@@ -3,7 +3,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import onebankRoutes from './routes/onebank.routes.js';
 import cognigyRoutes from './routes/cognigy.routes.js';
-
+import authRoutes from './routes/auth.routes.js';
 
 dotenv.config();
 
@@ -11,7 +11,9 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use('/api/auth', authRoutes);
 app.use('/api/cognigy', cognigyRoutes);
+app.use('/api/onebank', onebankRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -19,8 +21,6 @@ app.get('/api/health', (_req, res) => {
     service: 'cognigy-demo-backend'
   });
 });
-
-app.use('/api/onebank', onebankRoutes);
 
 const PORT = process.env.PORT || 3001;
 
