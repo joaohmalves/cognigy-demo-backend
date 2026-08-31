@@ -6,7 +6,6 @@ const router = Router();
 
 // ============================================================
 // GET /api/auth/test
-// Teste de conexão com Supabase
 // ============================================================
 
 router.get('/test', async (_req, res) => {
@@ -44,13 +43,6 @@ router.get('/test', async (_req, res) => {
 
 // ============================================================
 // GET /api/auth/me
-//
-// Retorna informações do usuário atualmente autenticado.
-//
-// O frontend usa esse endpoint para saber:
-// - quem é o usuário
-// - qual é sua role
-// - quais permissões ele possui
 // ============================================================
 
 router.get('/me', requireAuth, async (req, res) => {
@@ -86,7 +78,7 @@ router.get('/me', requireAuth, async (req, res) => {
     const user = authData.user;
 
     // ========================================================
-    // 2. Busca profile + role
+    // 2. Busca PROFILE
     // ========================================================
 
     const {
@@ -94,22 +86,25 @@ router.get('/me', requireAuth, async (req, res) => {
       error: profileError,
     } = await supabaseAdmin
       .from('profiles')
-      .select(`
-        id,
-        display_name,
-        role_id,
-        roles (
-          id,
-          name
-        )
-      `)
+      .select('id, display_name, role_id')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
-    if (profileError || !profile) {
+    if (profileError) {
       console.error(
-        '[auth/me] profile não encontrado',
+        '[auth/me] erro ao buscar profile:',
         profileError
+      );
+
+      return res.status(500).json({
+        error: 'Erro ao buscar perfil do usuário',
+      });
+    }
+
+    if (!profile) {
+      console.error(
+        '[auth/me] profile não encontrado para:',
+        userId
       );
 
       return res.status(404).json({
@@ -117,12 +112,32 @@ router.get('/me', requireAuth, async (req, res) => {
       });
     }
 
-    const role = Array.isArray(profile.roles)
-      ? profile.roles[0]
-      : profile.roles;
+    // ========================================================
+    // 3. Busca ROLE separadamente
+    // ========================================================
+
+    const {
+      data: role,
+      error: roleError,
+    } = await supabaseAdmin
+      .from('roles')
+      .select('id, name')
+      .eq('id', profile.role_id)
+      .maybeSingle();
+
+    if (roleError) {
+      console.error(
+        '[auth/me] erro ao buscar role:',
+        roleError
+      );
+
+      return res.status(500).json({
+        error: 'Erro ao buscar role do usuário',
+      });
+    }
 
     // ========================================================
-    // 3. Busca permissões da ROLE
+    // 4. Busca permissões da ROLE
     // ========================================================
 
     const {
@@ -140,7 +155,7 @@ router.get('/me', requireAuth, async (req, res) => {
 
     if (rolePermissionsError) {
       console.error(
-        '[auth/me] erro ao buscar role permissions',
+        '[auth/me] erro ao buscar role permissions:',
         rolePermissionsError
       );
 
@@ -150,7 +165,7 @@ router.get('/me', requireAuth, async (req, res) => {
     }
 
     // ========================================================
-    // 4. Busca permissões INDIVIDUAIS
+    // 5. Busca permissões INDIVIDUAIS
     // ========================================================
 
     const {
@@ -168,7 +183,7 @@ router.get('/me', requireAuth, async (req, res) => {
 
     if (userPermissionsError) {
       console.error(
-        '[auth/me] erro ao buscar user permissions',
+        '[auth/me] erro ao buscar user permissions:',
         userPermissionsError
       );
 
@@ -178,7 +193,7 @@ router.get('/me', requireAuth, async (req, res) => {
     }
 
     // ========================================================
-    // 5. Junta permissões da ROLE + individuais
+    // 6. Junta permissões
     // ========================================================
 
     const rolePermissionNames = (rolePermissions ?? [])
@@ -205,7 +220,6 @@ router.get('/me', requireAuth, async (req, res) => {
         (name): name is string => Boolean(name)
       );
 
-    // Remove duplicados
     const permissions = Array.from(
       new Set([
         ...rolePermissionNames,
@@ -214,7 +228,7 @@ router.get('/me', requireAuth, async (req, res) => {
     );
 
     // ========================================================
-    // 6. ADMIN possui acesso total
+    // 7. Admin possui todas as permissões
     // ========================================================
 
     if (role?.name === 'admin') {
@@ -237,7 +251,7 @@ router.get('/me', requireAuth, async (req, res) => {
     }
 
     // ========================================================
-    // 7. Retorna informações do usuário
+    // 8. Retorna usuário
     // ========================================================
 
     return res.json({
@@ -266,7 +280,10 @@ router.get('/me', requireAuth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[auth/me] erro inesperado', error);
+    console.error(
+      '[auth/me] erro inesperado:',
+      error
+    );
 
     return res.status(500).json({
       error: 'Erro interno ao buscar usuário',
