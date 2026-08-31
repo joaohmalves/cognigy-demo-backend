@@ -287,14 +287,27 @@ router.put('/:id/role', async (req, res) => {
     });
   }
 
+  // Busca dados do usuário no Auth para preencher display_name
+  // caso seja preciso CRIAR o profile (upsert).
+  const {
+    data: authUser,
+  } = await supabaseAdmin.auth.admin.getUserById(id);
+
   const {
     error: updateError,
   } = await supabaseAdmin
     .from('profiles')
-    .update({
-      role_id: roleId,
-    })
-    .eq('id', id);
+    .upsert(
+      {
+        id,
+        role_id: roleId,
+        display_name:
+          authUser?.user?.user_metadata?.displayName ??
+          authUser?.user?.email ??
+          null,
+      },
+      { onConflict: 'id' }
+    );
 
   if (updateError) {
     console.error(
