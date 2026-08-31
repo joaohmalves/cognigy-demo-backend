@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 import onebankRoutes from './routes/onebank.routes.js';
 import cognigyRoutes from './routes/cognigy.routes.js';
 import authRoutes from './routes/auth.routes.js';
+import demosRoutes from './routes/demos.routes.js';
+import adminDemosRoutes from './routes/admin-demos.routes.js';
+import auditRoutes from './routes/audit.routes.js';
 
 dotenv.config();
 
@@ -14,6 +17,9 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/cognigy', cognigyRoutes);
 app.use('/api/onebank', onebankRoutes);
+app.use('/api/demos', demosRoutes);
+app.use('/api/admin/demos', adminDemosRoutes);
+app.use('/api/audit', auditRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({
