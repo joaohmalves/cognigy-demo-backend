@@ -291,4 +291,119 @@ router.get('/me', requireAuth, async (req, res) => {
   }
 });
 
+// ============================================================
+// POST /api/auth/exchange-code
+// Gera um código de uso único para handoff nas demos multimodais
+// ============================================================
+
+router.post('/exchange-code', requireAuth, async (req, res) => {
+  const userId = req.authUserId;
+
+  if (!userId) {
+    return res.status(401).json({
+      error: 'Usuário não autenticado',
+    });
+  }
+
+  try {
+    const code = crypto.randomUUID().replace(/-/g, '');
+    const expiresAt = new Date(Date.now() + 60 * 1000); // 60s de validade
+
+    const { error } = await supabaseAdmin
+      .from('exchange_codes')
+      .insert({
+        code,
+        user_id: userId,
+        expires_at: expiresAt.toISOString(),
+      });
+
+    if (error) {
+      console.error('[auth/exchange-code] erro ao criar código:', error);
+      return res.status(500).json({
+        error: 'Erro ao gerar código de troca',
+      });
+    }
+
+    return res.json({ code });
+  } catch (error) {
+    console.error('[auth/exchange-code] erro inesperado:', error);
+    return res.status(500).json({
+      error: 'Erro interno ao gerar código',
+    });
+  }
+});
+
+// ============================================================
+// POST /api/auth/redeem-code
+// Resgata o código de handoff gerado em /exchange-code
+// ============================================================
+
+router.post('/redeem-code', async (req, res) => {
+  const { code } = req.body ?? {};
+
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({
+      error: 'Código ausente ou inválido',
+    });
+  }
+
+  try {
+    const { data: exchangeCode, error: fetchError } = await supabaseAdmin
+      .from('exchange_codes')
+      .select('id, user_id, expires_at, used_at')
+      .eq('code', code)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('[auth/redeem-code] erro ao buscar código:', fetchError);
+      return res.status(500).json({ error: 'Erro ao validar código' });
+    }
+
+    if (!exchangeCode) {
+      return res.status(404).json({ error: 'Código inválido' });
+    }
+
+    if (exchangeCode.used_at) {
+      return res.status(409).json({ error: 'Código já utilizado' });
+    }
+
+    if (new Date(exchangeCode.expires_at).getTime() < Date.now()) {
+      return res.status(410).json({ error: 'Código expirado' });
+    }
+
+    // Marca como usado (uso único)
+    const { error: updateError } = await supabaseAdmin
+      .from('exchange_codes')
+      .update({ used_at: new Date().toISOString() })
+      .eq('id', exchangeCode.id);
+
+    if (updateError) {
+      console.error('[auth/redeem-code] erro ao marcar código como usado:', updateError);
+      return res.status(500).json({ error: 'Erro ao resgatar código' });
+    }
+
+    // Busca dados básicos do usuário pra devolver pro front do OneBank
+    const { data: authData } = await supabaseAdmin.auth.admin.getUserById(
+      exchangeCode.user_id,
+    );
+
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('display_name')
+      .eq('id', exchangeCode.user_id)
+      .maybeSingle();
+
+    return res.json({
+      user: {
+        id: exchangeCode.user_id,
+        email: authData?.user?.email ?? null,
+        displayName: profile?.display_name ?? authData?.user?.email ?? 'Usuário',
+      },
+    });
+  } catch (error) {
+    console.error('[auth/redeem-code] erro inesperado:', error);
+    return res.status(500).json({ error: 'Erro interno ao resgatar código' });
+  }
+});
+
 export default router;
