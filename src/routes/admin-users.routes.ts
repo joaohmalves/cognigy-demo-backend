@@ -1,3 +1,5 @@
+// src/routes/admin-users.routes.ts
+
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/requirePermission.js';
@@ -101,6 +103,57 @@ router.get('/', async (_req, res) => {
     }
 
     // ----------------------------------------------------------
+    // Busca permissões padrão das roles
+    // ----------------------------------------------------------
+
+    const {
+      data: rolePermissions,
+      error: rolePermissionsError,
+    } = await supabaseAdmin
+      .from('role_permissions')
+      .select(`
+        role_id,
+        permission_id,
+        permissions (
+          id,
+          name
+        )
+      `);
+
+    if (rolePermissionsError) {
+      console.error(
+        '[admin/users] erro ao buscar permissões das roles',
+        rolePermissionsError
+      );
+
+      return res.status(500).json({
+        error: 'Erro ao buscar permissões das roles',
+      });
+    }
+
+    // ----------------------------------------------------------
+    // Busca todas as permissões disponíveis
+    // ----------------------------------------------------------
+
+    const {
+      data: allPermissions,
+      error: allPermissionsError,
+    } = await supabaseAdmin
+      .from('permissions')
+      .select('id, name');
+
+    if (allPermissionsError) {
+      console.error(
+        '[admin/users] erro ao buscar todas as permissões',
+        allPermissionsError
+      );
+
+      return res.status(500).json({
+        error: 'Erro ao buscar permissões',
+      });
+    }
+
+    // ----------------------------------------------------------
     // Busca demos individuais
     // ----------------------------------------------------------
 
@@ -146,19 +199,75 @@ router.get('/', async (_req, res) => {
             name: permission?.name,
           };
         })
-        .filter((permission) => permission.id);
-
-      const demos = (userDemos ?? [])
-        .filter((item) => item.user_id === user.id)
-        .map((item) => item.demo_id);
+        .filter(
+          (permission): permission is {
+            id: string;
+            name: string;
+          } =>
+            Boolean(
+              permission.id &&
+              permission.name
+            )
+        );
 
       const role = Array.isArray(profile?.roles)
         ? profile.roles[0]
         : profile?.roles;
 
+      const inheritedPermissions = (rolePermissions ?? [])
+        .filter(
+          (item) =>
+            item.role_id === profile?.role_id
+        )
+        .map((item) => {
+          const permission = Array.isArray(item.permissions)
+            ? item.permissions[0]
+            : item.permissions;
+
+          return {
+            id: permission?.id,
+            name: permission?.name,
+          };
+        })
+        .filter(
+          (permission): permission is {
+            id: string;
+            name: string;
+          } =>
+            Boolean(
+              permission.id &&
+              permission.name
+            )
+        );
+
+      // Admin possui todas as permissões.
+      //
+      // Para as demais roles:
+      // permissões efetivas =
+      // permissões da role + permissões individuais.
+      const effectivePermissions =
+        role?.name?.toLowerCase() === 'admin'
+          ? (allPermissions ?? [])
+          : Array.from(
+              new Map(
+                [
+                  ...inheritedPermissions,
+                  ...permissions,
+                ].map((permission) => [
+                  permission.id,
+                  permission,
+                ])
+              ).values()
+            );
+
+      const demos = (userDemos ?? [])
+        .filter((item) => item.user_id === user.id)
+        .map((item) => item.demo_id);
+
       return {
         id: user.id,
         email: user.email,
+
         displayName:
           profile?.display_name ??
           user.user_metadata?.displayName ??
@@ -171,8 +280,27 @@ router.get('/', async (_req, res) => {
             }
           : null,
 
+        // Permissões adicionadas diretamente ao usuário.
         permissions,
+
+        // Permissões herdadas da role.
+        rolePermissions: inheritedPermissions,
+
+        // União das permissões da role + individuais.
+        effectivePermissions,
+
         demos,
+
+        // Admin e Sales possuem acesso automático a todas
+        // as demos.
+        //
+        // Viewer possui somente as demos atribuídas
+        // individualmente através de user_demos.
+        demoAccess:
+          role?.name?.toLowerCase() === 'admin' ||
+          role?.name?.toLowerCase() === 'sales'
+            ? 'all'
+            : 'assigned',
 
         createdAt: user.created_at,
         lastSignInAt: user.last_sign_in_at,
@@ -181,7 +309,10 @@ router.get('/', async (_req, res) => {
 
     return res.json(result);
   } catch (error) {
-    console.error('[admin/users] erro inesperado', error);
+    console.error(
+      '[admin/users] erro inesperado',
+      error
+    );
 
     return res.status(500).json({
       error: 'Erro interno ao buscar usuários',
@@ -192,13 +323,15 @@ router.get('/', async (_req, res) => {
 // ============================================================
 // GET /api/admin/users/options
 //
-// Retorna roles, permissions e demos disponíveis para o painel.
+// Retorna roles, permissions, permissões das roles e demos
+// disponíveis para o painel.
 // ============================================================
 
 router.get('/options', async (_req, res) => {
   const [
     rolesResult,
     permissionsResult,
+    rolePermissionsResult,
     demosResult,
   ] = await Promise.all([
     supabaseAdmin
@@ -210,6 +343,10 @@ router.get('/options', async (_req, res) => {
       .from('permissions')
       .select('id, name')
       .order('name'),
+
+    supabaseAdmin
+      .from('role_permissions')
+      .select('role_id, permission_id'),
 
     supabaseAdmin
       .from('demos')
@@ -230,6 +367,12 @@ router.get('/options', async (_req, res) => {
     });
   }
 
+  if (rolePermissionsResult.error) {
+    return res.status(500).json({
+      error: 'Erro ao buscar permissões das roles',
+    });
+  }
+
   if (demosResult.error) {
     return res.status(500).json({
       error: 'Erro ao buscar demos',
@@ -239,6 +382,8 @@ router.get('/options', async (_req, res) => {
   return res.json({
     roles: rolesResult.data,
     permissions: permissionsResult.data,
+    rolePermissions: rolePermissionsResult.data,
+
     demos: demosResult.data.map((demo) => ({
       id: demo.id,
       name:
@@ -264,7 +409,7 @@ router.put('/:id/role', async (req, res) => {
     });
   }
 
-  // Verifica se a role existe
+  // Verifica se a role existe.
   const {
     data: role,
     error: roleError,
@@ -287,8 +432,8 @@ router.put('/:id/role', async (req, res) => {
     });
   }
 
-  // Busca dados do usuário no Auth para preencher display_name
-  // caso seja preciso CRIAR o profile (upsert).
+  // Busca dados do usuário no Auth para preencher
+  // display_name caso seja preciso criar o profile.
   const {
     data: authUser,
   } = await supabaseAdmin.auth.admin.getUserById(id);
@@ -306,7 +451,9 @@ router.put('/:id/role', async (req, res) => {
           authUser?.user?.email ??
           null,
       },
-      { onConflict: 'id' }
+      {
+        onConflict: 'id',
+      }
     );
 
   if (updateError) {
@@ -341,6 +488,11 @@ router.put('/:id/role', async (req, res) => {
 // PUT /api/admin/users/:id/permissions
 //
 // Substitui TODAS as permissões individuais do usuário.
+//
+// IMPORTANTE:
+// permissões herdadas da role não são copiadas para
+// user_permissions. Essa tabela guarda somente exceções
+// individuais.
 // ============================================================
 
 router.put('/:id/permissions', async (req, res) => {
@@ -378,7 +530,7 @@ router.put('/:id/permissions', async (req, res) => {
   }
 
   // ----------------------------------------------------------
-  // Remove permissões atuais
+  // Remove permissões individuais atuais
   // ----------------------------------------------------------
 
   const {
@@ -395,7 +547,7 @@ router.put('/:id/permissions', async (req, res) => {
   }
 
   // ----------------------------------------------------------
-  // Insere novas permissões
+  // Insere novas permissões individuais
   // ----------------------------------------------------------
 
   if (permissionIds.length > 0) {
@@ -447,6 +599,9 @@ router.put('/:id/permissions', async (req, res) => {
 // PUT /api/admin/users/:id/demos
 //
 // Substitui TODAS as demos individuais do usuário.
+//
+// Admin e Sales possuem acesso global às demos e, portanto,
+// não utilizam user_demos.
 // ============================================================
 
 router.put('/:id/demos', async (req, res) => {
@@ -456,6 +611,63 @@ router.put('/:id/demos', async (req, res) => {
   if (!Array.isArray(demoIds)) {
     return res.status(400).json({
       error: 'demoIds deve ser um array',
+    });
+  }
+
+  // ----------------------------------------------------------
+  // Busca a role do usuário alvo.
+  // ----------------------------------------------------------
+
+  const {
+    data: targetProfile,
+    error: targetProfileError,
+  } = await supabaseAdmin
+    .from('profiles')
+    .select(`
+      role_id,
+      roles (
+        name
+      )
+    `)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (targetProfileError) {
+    console.error(
+      '[admin/users] erro ao buscar role do usuário para demos',
+      targetProfileError
+    );
+
+    return res.status(500).json({
+      error: 'Erro ao buscar role do usuário',
+    });
+  }
+
+  if (!targetProfile) {
+    return res.status(404).json({
+      error: 'Perfil do usuário não encontrado',
+    });
+  }
+
+  const targetRole = Array.isArray(targetProfile.roles)
+    ? targetProfile.roles[0]
+    : targetProfile.roles;
+
+  const targetRoleName =
+    targetRole?.name?.toLowerCase();
+
+  // ----------------------------------------------------------
+  // Admin e Sales não podem receber atribuições individuais.
+  // Eles já possuem acesso automático a todas as demos.
+  // ----------------------------------------------------------
+
+  if (
+    targetRoleName === 'admin' ||
+    targetRoleName === 'sales'
+  ) {
+    return res.status(400).json({
+      error:
+        'Usuários Admin e Sales possuem acesso automático a todas as demos',
     });
   }
 
